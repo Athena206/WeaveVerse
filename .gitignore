@@ -1,0 +1,16 @@
+backend/.env
+backend/.venv/
+backend/__pycache__/
+backend/mysql-data/
+backend/mysql-portable/
+backend/mysql-installer-inspect/
+backend/mysql-extract.log
+backend/mysql-extract.log.*
+backend/image-review/
+backend/mysql-server.log
+backend/*.out.log
+backend/*.err.log
+frontend/.env.local
+frontend/node_modules/
+frontend/dist/
+*.py[cod]
