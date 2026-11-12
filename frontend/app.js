@@ -193,8 +193,58 @@ function productGrid(products) {
   return `<div class="product-grid">${products.map(productCard).join("")}</div>`;
 }
 
+const fabricGroups = [
+  { label: "Mulmul cotton", values: ["mulmul cotton", "mull-mull cotton", "mul-mul cotton"] },
+  { label: "Silk", values: ["silk"] },
+  { label: "Silk cotton", values: ["silk cotton", "silk-cotton", "cotton-silk", "chanderi silk-cotton"] },
+  { label: "Crepe cotton", values: ["crepe cotton"] },
+  { label: "Georgette cotton", values: ["georgette cotton"] },
+  { label: "Crepe", values: ["crepe"] },
+  { label: "Georgette", values: ["georgette"] },
+  { label: "Cotton", values: ["cotton"] },
+  { label: "Organza", values: ["organza"] },
+  { label: "Linen", values: ["linen"] },
+  { label: "Tussar silk", values: ["tussar silk", "tosser silk"] },
+  { label: "Chiffon", values: ["chiffon"] },
+];
+
+function normalizedFabric(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getFabricOptions(products) {
+  const options = [];
+  const coveredValues = new Set();
+  for (const group of fabricGroups) {
+    const values = group.values.map(normalizedFabric);
+    const count = products.filter((product) => values.includes(normalizedFabric(product.fabric))).length;
+    if (count) {
+      options.push({ ...group, values, count });
+      values.forEach((value) => coveredValues.add(value));
+    }
+  }
+  for (const fabric of new Set(products.map((product) => product.fabric))) {
+    const value = normalizedFabric(fabric);
+    if (!coveredValues.has(value)) {
+      options.push({ label: fabric, values: [value], count: products.filter((product) => normalizedFabric(product.fabric) === value).length });
+    }
+  }
+  return options;
+}
+
+function selectedFabricValues(options, selectedFabric) {
+  const selected = normalizedFabric(selectedFabric);
+  const option = options.find((item) => normalizedFabric(item.label) === selected || item.values.includes(selected));
+  return option ? option.values : [selected];
+}
+
+function fabricIsSelected(fabric, selectedFabric) {
+  const selected = normalizedFabric(selectedFabric);
+  return normalizedFabric(fabric.label) === selected || fabric.values.includes(selected);
+}
+
 function homePage() {
-  const fabrics = [...new Set(state.products.map((product) => product.fabric))].slice(0, 8);
+  const fabrics = getFabricOptions(state.products);
   return `<section class="hero">
     <div class="hero-copy">
       <p class="eyebrow">A WORLD WOVEN BY HAND</p>
@@ -212,7 +262,7 @@ function homePage() {
   <section class="promise-strip"><span>✳ Made by skilled hands</span><span>✳ Rooted in Indian craft</span><span>✳ Chosen with care</span><span>✳ Worn for generations</span></section>
   ${state.products.length ? `<section class="fabric-collection" aria-label="Shop by fabric">
     <p class="eyebrow">FIND YOUR FAVOURITE FEEL</p>
-    ${fabrics.map((fabric) => `<a class="fabric-tile" href="#shop/${encodeURIComponent(fabric)}">${escapeHTML(fabric)} <span>↗</span></a>`).join("")}
+    ${fabrics.map((fabric) => `<a class="fabric-tile" href="#shop/${encodeURIComponent(fabric.label)}">${escapeHTML(fabric.label)} <span>(${fabric.count}) ↗</span></a>`).join("")}
     <a class="fabric-tile fabric-tile-all" href="#shop">All fabrics <span>→</span></a>
   </section>` : ""}
   <section class="section home-collection">
@@ -227,13 +277,14 @@ function homePage() {
 }
 
 function catalogPage() {
-  const fabrics = ["All fabrics", ...new Set(state.products.map((product) => product.fabric))];
+  const fabrics = getFabricOptions(state.products);
   const regions = ["All regions", ...new Set(state.products.map((product) => product.region))];
   const occasions = ["All occasions", ...new Set(state.products.map((product) => product.occasion))];
+  const selectedValues = selectedFabricValues(fabrics, state.catalog.fabric);
   const filtered = state.products.filter((product) => {
     const searchable = `${product.saree_name} ${product.fabric} ${product.weave} ${product.region} ${product.occasion}`.toLowerCase();
     return searchable.includes(state.catalog.search.toLowerCase())
-      && (state.catalog.fabric === "All fabrics" || product.fabric === state.catalog.fabric)
+      && (state.catalog.fabric === "All fabrics" || selectedValues.includes(normalizedFabric(product.fabric)))
       && (state.catalog.region === "All regions" || product.region === state.catalog.region)
       && (state.catalog.occasion === "All occasions" || product.occasion === state.catalog.occasion);
   }).sort((left, right) => {
@@ -245,7 +296,10 @@ function catalogPage() {
   return `<section class="page-shell catalog-page">
     <div class="catalog-intro"><div><p class="eyebrow">A THOUGHTFUL COLLECTION</p><h1>Find your <em>forever drape.</em></h1><p>Handloom stories, gathered from the places that make them.</p></div><span class="catalog-count">${filtered.length} of ${state.products.length} sarees</span></div>
     <div class="catalog-tools">
-      <div class="category-pills">${fabrics.map((fabric) => `<button class="${state.catalog.fabric === fabric ? "selected" : ""}" data-action="fabric" data-value="${escapeHTML(fabric)}">${escapeHTML(fabric)}</button>`).join("")}</div>
+      <div class="category-pills">
+        <button class="${state.catalog.fabric === "All fabrics" ? "selected" : ""}" data-action="fabric" data-value="All fabrics">All fabrics <span>${state.products.length}</span></button>
+        ${fabrics.map((fabric) => `<button class="${fabricIsSelected(fabric, state.catalog.fabric) ? "selected" : ""}" data-action="fabric" data-value="${escapeHTML(fabric.label)}">${escapeHTML(fabric.label)} <span>${fabric.count}</span></button>`).join("")}
+      </div>
       <label class="search-field"><span>⌕</span><input id="catalog-search" value="${escapeHTML(state.catalog.search)}" placeholder="Search weave, fabric, region..."></label>
     </div>
     <div class="catalog-refine">
@@ -654,6 +708,9 @@ function handleAction(button, clickEvent) {
     checkout();
   } else if (action === "fabric") {
     state.catalog.fabric = button.dataset.value;
+    state.catalog.search = "";
+    state.catalog.region = "All regions";
+    state.catalog.occasion = "All occasions";
     render();
   } else if (action === "clear-filters") {
     state.catalog = { search: "", fabric: "All fabrics", region: "All regions", occasion: "All occasions", sort: "newest" };
@@ -707,6 +764,9 @@ window.addEventListener("hashchange", () => {
   state.quantity = 1;
   if (state.route.page === "shop" && state.route.fabric) {
     state.catalog.fabric = state.route.fabric;
+    state.catalog.search = "";
+    state.catalog.region = "All regions";
+    state.catalog.occasion = "All occasions";
   } else if (state.route.page === "shop") {
     state.catalog.fabric = "All fabrics";
   }

@@ -187,7 +187,15 @@ VALUES
   ('Printed Mulmul Daydream', 'Everyday', 'Mulmul cotton', 'Printed', 'West Bengal', 'Everyday',
    'Cloud-soft mulmul cotton with an easy botanical print for everyday comfort.',
    1299.00, 14, '/uploads/saree-10.jpg', 'First Saree Centre', 'Provided project reference',
-   '')
+   ''),
+  ('Cotton Crepe Blossom', 'Contemporary', 'Crepe cotton', 'Printed crepe', 'Rajasthan', 'Celebration',
+   'A light cotton-crepe saree with a soft fall and a floral print for celebrations.',
+   2299.00, 8, '/uploads/weaveverse-model-19.jpg', 'Unsplash', 'Unsplash License',
+   'https://unsplash.com/photos/woman-in-purple-and-white-floral-sari-X-rtukesXzY'),
+  ('Cotton Georgette Garden', 'Contemporary', 'Georgette cotton', 'Printed georgette', 'Uttar Pradesh', 'Celebration',
+   'An airy cotton-georgette saree with a fluid drape and a bright printed border.',
+   2699.00, 7, '/uploads/weaveverse-model-20.jpg', 'Unsplash', 'Unsplash License',
+   'https://unsplash.com/photos/a-beautiful-woman-in-a-colorful-sari-dCuCMZ9XnHg')
 ON DUPLICATE KEY UPDATE
   category = VALUES(category),
   fabric = VALUES(fabric),

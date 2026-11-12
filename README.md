@@ -2,7 +2,7 @@
 
 A local-first saree storefront with an HTML/CSS/JavaScript front end, a Flask API, and a real
 MySQL 8.4 database. The starter includes customer accounts, an inventory-backed
-shopping bag and checkout, live reviews, 24 saree listings, fabric discovery,
+shopping bag and checkout, live reviews, 26 saree listings, fabric discovery,
 and a persistent light/dark theme. Its visual identity uses a custom woven W
 mark, an editorial forest-and-ivory palette, and a curated collection of Indian
 saree model photography.
@@ -14,7 +14,7 @@ saree model photography.
   package installation is required.
 - **Backend:** Python 3 and Flask in `backend/app.py`. Flask serves the frontend
   files and JSON API from the same origin at `http://127.0.0.1:5000`.
-- **Database:** MySQL 8.4. The schema and 24-product seed data are in
+- **Database:** MySQL 8.4. The schema and 26-product seed data are in
   `backend/schema.sql`; Python dependencies are listed in
   `backend/requirements.txt`.
 
@@ -48,7 +48,7 @@ backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 backend\.venv\Scripts\python.exe backend\setup_database.py
 ```
 
-The setup script creates the MySQL tables, seeds 24 sarees with 24 local product
+The setup script creates the MySQL tables, seeds 26 sarees with local product
 photos, creates a restricted application database user, and generates passwords
 and a signing secret in `backend\.env`. That file is ignored by Git; do not
 share it. For a fresh database, keep `MYSQL_ROOT_PASSWORD` blank in
@@ -71,7 +71,7 @@ is remembered on that device.
 
 ## Shop features
 
-- 24 named sarees with stock, prices, weave, region, occasion, and local photos.
+- 26 named sarees with stock, prices, weave, region, occasion, and local photos.
 - Search and filter by fabric, region, and occasion; sort by price or name.
 - Product pages with quantity controls, an image credit, and customer reviews.
 - Customer registration, sign-in, session restoration, sign-out, and order history.
