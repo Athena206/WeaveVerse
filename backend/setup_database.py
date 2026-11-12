@@ -118,7 +118,6 @@ ENV_FILE.write_text(
             f"MYSQL_ROOT_PASSWORD={root_password}",
             f"MYSQL_DATABASE={DATABASE}",
             f"SECRET_KEY={secret_key}",
-            "FRONTEND_ORIGIN=http://localhost:5173,http://127.0.0.1:5173",
             "UPLOAD_FOLDER=uploads",
             "JWT_TTL_HOURS=12",
             "",

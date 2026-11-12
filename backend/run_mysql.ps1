@@ -25,8 +25,8 @@ if (-not (Test-Path (Join-Path $dataDirectory "auto.cnf"))) {
 
 $arguments = @(
     "--no-defaults",
-    "--basedir=$serverRoot",
-    "--datadir=$dataDirectory",
+    "--basedir=`"$serverRoot`"",
+    "--datadir=`"$dataDirectory`"",
     "--bind-address=127.0.0.1",
     "--port=3306",
     "--mysqlx=0",

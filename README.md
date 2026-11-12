@@ -1,11 +1,22 @@
 # WeaveVerse
 
-A local-first saree storefront with a React front end, Flask API, and a real
+A local-first saree storefront with an HTML/CSS/JavaScript front end, a Flask API, and a real
 MySQL 8.4 database. The starter includes customer accounts, an inventory-backed
 shopping bag and checkout, live reviews, 24 saree listings, fabric discovery,
 and a persistent light/dark theme. Its visual identity uses a custom woven W
 mark, an editorial forest-and-ivory palette, and a curated collection of Indian
 saree model photography.
+
+## Technology stack
+
+- **Frontend:** HTML in `frontend/index.html`, CSS in `frontend/src/styles.css`,
+  and plain JavaScript in `frontend/app.js`. No React, Vite, Node.js, or frontend
+  package installation is required.
+- **Backend:** Python 3 and Flask in `backend/app.py`. Flask serves the frontend
+  files and JSON API from the same origin at `http://127.0.0.1:5000`.
+- **Database:** MySQL 8.4. The schema and 24-product seed data are in
+  `backend/schema.sql`; Python dependencies are listed in
+  `backend/requirements.txt`.
 
 ## Run it on Windows
 
@@ -44,23 +55,16 @@ share it. For a fresh database, keep `MYSQL_ROOT_PASSWORD` blank in
 `backend\.env`; the setup script assigns a generated root password. Re-running
 the setup keeps existing inventory counts intact.
 
-### 3. Start the API and storefront
+### 3. Start the storefront
 
-In one PowerShell window:
+Start the Python server from the project folder:
 
 ```powershell
 backend\.venv\Scripts\python.exe backend\app.py
 ```
 
-In another:
-
-```powershell
-Set-Location frontend
-npm install
-npm run dev
-```
-
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API health check is
+Open [http://127.0.0.1:5000](http://127.0.0.1:5000). Flask serves both the
+storefront and its API from the same origin. The API health check is
 available at [http://127.0.0.1:5000/api/health](http://127.0.0.1:5000/api/health).
 Use the browser's theme button to switch between light and dark mode. The choice
 is remembered on that device.

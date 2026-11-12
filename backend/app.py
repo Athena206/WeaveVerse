@@ -9,7 +9,6 @@ import jwt
 import pymysql
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
-from flask_cors import CORS
 from pymysql.cursors import DictCursor
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -17,29 +16,24 @@ from werkzeug.security import check_password_hash, generate_password_hash
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
+FRONTEND_DIR = BASE_DIR.parent / "frontend"
 UPLOAD_FOLDER = Path(os.getenv("UPLOAD_FOLDER", str(BASE_DIR / "uploads")))
 if not UPLOAD_FOLDER.is_absolute():
     UPLOAD_FOLDER = BASE_DIR / UPLOAD_FOLDER
 UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=str(FRONTEND_DIR),
+    static_url_path="",
+)
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "")
-CORS(
-    app,
-    resources={
-        r"/api/*": {
-            "origins": [
-                origin.strip()
-                for origin in os.getenv(
-                    "FRONTEND_ORIGIN",
-                    "http://localhost:5173,http://127.0.0.1:5173",
-                ).split(",")
-                if origin.strip()
-            ]
-        }
-    },
-)
+
+
+@app.get("/")
+def storefront() -> Any:
+    return app.send_static_file("index.html")
 
 
 def get_connection() -> pymysql.Connection:
