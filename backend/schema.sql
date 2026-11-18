@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS sarees (
   image_credit VARCHAR(180) NOT NULL DEFAULT 'First Saree Centre',
   image_license VARCHAR(80) NOT NULL DEFAULT 'Project photography',
   image_source VARCHAR(1000) NOT NULL DEFAULT '',
+  length_meters DECIMAL(3, 1) NOT NULL DEFAULT 6.2,
+  blouse_piece_meters DECIMAL(3, 1) NOT NULL DEFAULT 0.8,
+  weight_grams INT UNSIGNED NOT NULL DEFAULT 480,
+  drape_feel VARCHAR(60) NOT NULL DEFAULT 'Fluid & breathable',
+  sheerness VARCHAR(40) NOT NULL DEFAULT 'Opaque',
+  care_instructions VARCHAR(240) NOT NULL DEFAULT 'Dry clean recommended, store folded in unbleached muslin.',
+  focal_point VARCHAR(30) NOT NULL DEFAULT '50% 18%',
+  weight_score TINYINT UNSIGNED NOT NULL DEFAULT 45,
+  drape_score TINYINT UNSIGNED NOT NULL DEFAULT 80,
+  sheerness_score TINYINT UNSIGNED NOT NULL DEFAULT 25,
+  luster_score TINYINT UNSIGNED NOT NULL DEFAULT 70,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (product_id),
@@ -61,6 +72,8 @@ CREATE TABLE IF NOT EXISTS order_details (
   saree_name VARCHAR(180) NOT NULL,
   quantity INT UNSIGNED NOT NULL,
   unit_price DECIMAL(10, 2) UNSIGNED NOT NULL,
+  customization_note VARCHAR(255) NOT NULL DEFAULT '',
+  addon_price DECIMAL(10, 2) UNSIGNED NOT NULL DEFAULT 0.00,
   PRIMARY KEY (order_detail_id),
   UNIQUE KEY uq_order_product (order_id, product_id),
   KEY ix_order_details_product (product_id),
@@ -86,6 +99,31 @@ CREATE TABLE IF NOT EXISTS reviews (
   CONSTRAINT fk_reviews_customer
     FOREIGN KEY (customer_id) REFERENCES customers (id),
   CONSTRAINT chk_review_rating CHECK (rating BETWEEN 1 AND 5)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS saree_images (
+  image_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  product_id BIGINT UNSIGNED NOT NULL,
+  image_url VARCHAR(1000) NOT NULL,
+  shot_type ENUM('drape', 'pallu', 'border', 'blouse') NOT NULL DEFAULT 'drape',
+  sort_order TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (image_id),
+  KEY ix_saree_images_product (product_id, sort_order),
+  CONSTRAINT fk_saree_images_product
+    FOREIGN KEY (product_id) REFERENCES sarees (product_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS wishlists (
+  wishlist_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  customer_id BIGINT UNSIGNED NOT NULL,
+  product_id BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (wishlist_id),
+  UNIQUE KEY uq_wishlist_customer_product (customer_id, product_id),
+  CONSTRAINT fk_wishlists_customer
+    FOREIGN KEY (customer_id) REFERENCES customers (id),
+  CONSTRAINT fk_wishlists_saree
+    FOREIGN KEY (product_id) REFERENCES sarees (product_id)
 ) ENGINE=InnoDB;
 
 INSERT INTO sarees

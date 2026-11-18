@@ -1,0 +1,31 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run WeaveVerse Flask app",
+			"type": "shell",
+			"command": "backend\\.venv\\Scripts\\python.exe",
+			"args": [
+				"backend\\app.py"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "Run WeaveVerse MySQL on 3307",
+			"type": "shell",
+			"command": "D:\\WeaveVerse\\backend\\mysql-portable\\PFiles64\\MySQL\\MySQL Server 8.4\\bin\\mysqld.exe",
+			"args": [
+				"--no-defaults",
+				"--basedir=D:\\WeaveVerse\\backend\\mysql-portable\\PFiles64\\MySQL\\MySQL Server 8.4",
+				"--datadir=D:\\WeaveVerse\\backend\\mysql-data",
+				"--bind-address=127.0.0.1",
+				"--port=3307",
+				"--mysqlx=0",
+				"--console"
+			],
+			"isBackground": true,
+			"problemMatcher": []
+		}
+	]
+}

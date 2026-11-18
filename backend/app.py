@@ -13,9 +13,10 @@ from pymysql.cursors import DictCursor
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = BASE_DIR / ".env"
+load_dotenv(ENV_FILE, override=True)
+
 FRONTEND_DIR = BASE_DIR.parent / "frontend"
 UPLOAD_FOLDER = Path(os.getenv("UPLOAD_FOLDER", str(BASE_DIR / "uploads")))
 if not UPLOAD_FOLDER.is_absolute():
@@ -37,6 +38,7 @@ def storefront() -> Any:
 
 
 def get_connection() -> pymysql.Connection:
+    load_dotenv(ENV_FILE, override=True)
     return pymysql.connect(
         host=os.getenv("MYSQL_HOST", "127.0.0.1"),
         port=int(os.getenv("MYSQL_PORT", "3306")),
@@ -217,8 +219,16 @@ def current_customer() -> Any:
 def serialize_product(product: dict[str, Any]) -> dict[str, Any]:
     product["price"] = str(product["price"])
     product["average_rating"] = float(product["average_rating"])
+    if "length_meters" in product and product["length_meters"] is not None:
+        product["length_meters"] = float(product["length_meters"])
+    if "blouse_piece_meters" in product and product["blouse_piece_meters"] is not None:
+        product["blouse_piece_meters"] = float(product["blouse_piece_meters"])
     if product["image_url"].startswith("/uploads/"):
         product["image_url"] = f"{request.host_url.rstrip('/')}{product['image_url']}"
+    if "images" in product and isinstance(product["images"], list):
+        for img in product["images"]:
+            if img["image_url"].startswith("/uploads/"):
+                img["image_url"] = f"{request.host_url.rstrip('/')}{img['image_url']}"
     return product
 
 
@@ -256,6 +266,9 @@ def list_products() -> Any:
         SELECT s.product_id, s.saree_name, s.category, s.fabric, s.weave, s.region,
                s.occasion, s.description, s.price, s.stock, s.image_url,
                s.image_credit, s.image_license, s.image_source,
+               s.length_meters, s.blouse_piece_meters, s.weight_grams,
+               s.drape_feel, s.sheerness, s.care_instructions, s.focal_point,
+               s.weight_score, s.drape_score, s.sheerness_score, s.luster_score,
                COALESCE(r.review_count, 0) AS review_count,
                COALESCE(r.average_rating, 0) AS average_rating
         FROM sarees AS s
@@ -271,6 +284,19 @@ def list_products() -> Any:
         with connection.cursor() as cursor:
             cursor.execute(query, values)
             products = cursor.fetchall()
+            cursor.execute(
+                "SELECT product_id, image_url, shot_type FROM saree_images ORDER BY sort_order ASC"
+            )
+            gallery_rows = cursor.fetchall()
+    gallery_by_product: dict[int, list[dict[str, Any]]] = {}
+    for row in gallery_rows:
+        gallery_by_product.setdefault(row["product_id"], []).append(
+            {"image_url": row["image_url"], "shot_type": row["shot_type"]}
+        )
+    for product in products:
+        product["images"] = gallery_by_product.get(
+            product["product_id"], [{"image_url": product["image_url"], "shot_type": "drape"}]
+        )
     return jsonify({"products": [serialize_product(product) for product in products]})
 
 
@@ -283,6 +309,9 @@ def get_product(product_id: int) -> Any:
                 SELECT product_id, saree_name, category, fabric, weave, region,
                        occasion, description, price, stock, image_url,
                        image_credit, image_license, image_source,
+                       length_meters, blouse_piece_meters, weight_grams,
+                       drape_feel, sheerness, care_instructions, focal_point,
+                       weight_score, drape_score, sheerness_score, luster_score,
                        (SELECT COUNT(*) FROM reviews WHERE reviews.product_id = sarees.product_id)
                          AS review_count,
                        COALESCE(
@@ -295,6 +324,14 @@ def get_product(product_id: int) -> Any:
                 (product_id,),
             )
             product = cursor.fetchone()
+            if product:
+                cursor.execute(
+                    "SELECT image_url, shot_type FROM saree_images WHERE product_id = %s ORDER BY sort_order ASC",
+                    (product_id,),
+                )
+                product["images"] = cursor.fetchall() or [
+                    {"image_url": product["image_url"], "shot_type": "drape"}
+                ]
     if not product:
         return jsonify({"error": "Saree not found."}), 404
     return jsonify({"product": serialize_product(product)})
@@ -353,6 +390,51 @@ def create_review(product_id: int) -> Any:
     return jsonify({"review_id": review_id, "message": "Thank you for sharing your review."}), 201
 
 
+@app.get("/api/wishlist")
+@token_required
+def list_wishlist() -> Any:
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT product_id FROM wishlists WHERE customer_id = %s ORDER BY created_at DESC",
+                (request.customer_id,),
+            )
+            ids = [row["product_id"] for row in cursor.fetchall()]
+    return jsonify({"product_ids": ids})
+
+
+@app.post("/api/wishlist/<int:product_id>")
+@token_required
+def toggle_wishlist(product_id: int) -> Any:
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT product_id FROM sarees WHERE product_id = %s AND is_active = TRUE",
+                (product_id,),
+            )
+            if not cursor.fetchone():
+                return jsonify({"error": "Saree not found."}), 404
+            cursor.execute(
+                "SELECT wishlist_id FROM wishlists WHERE customer_id = %s AND product_id = %s",
+                (request.customer_id, product_id),
+            )
+            existing = cursor.fetchone()
+            if existing:
+                cursor.execute(
+                    "DELETE FROM wishlists WHERE wishlist_id = %s",
+                    (existing["wishlist_id"],),
+                )
+                saved = False
+            else:
+                cursor.execute(
+                    "INSERT INTO wishlists (customer_id, product_id) VALUES (%s, %s)",
+                    (request.customer_id, product_id),
+                )
+                saved = True
+        connection.commit()
+    return jsonify({"saved": saved, "product_id": product_id})
+
+
 @app.get("/api/orders")
 @token_required
 def list_orders() -> Any:
@@ -361,7 +443,8 @@ def list_orders() -> Any:
             cursor.execute(
                 """
                 SELECT o.order_id, o.total_amount, o.status, o.created_at,
-                       d.product_id, d.saree_name, d.quantity, d.unit_price
+                       d.product_id, d.saree_name, d.quantity, d.unit_price,
+                       d.customization_note, d.addon_price
                 FROM orders AS o
                 LEFT JOIN order_details AS d ON d.order_id = o.order_id
                 WHERE o.customer_id = %s
@@ -385,6 +468,8 @@ def list_orders() -> Any:
                     "saree_name": row["saree_name"],
                     "quantity": row["quantity"],
                     "unit_price": str(row["unit_price"]),
+                    "customization_note": row.get("customization_note") or "",
+                    "addon_price": str(row.get("addon_price") or "0.00"),
                 }
             )
     return jsonify({"orders": list(orders.values())})
@@ -399,6 +484,8 @@ def place_order() -> Any:
         raise ValueError("At least one order item is required.")
 
     quantities: dict[int, int] = {}
+    customizations: dict[int, tuple[str, Decimal]] = {}
+    allowed_addons = {Decimal("0"), Decimal("250"), Decimal("350"), Decimal("600")}
     for item in items:
         if not isinstance(item, dict):
             raise ValueError("Each item must include a product_id and quantity.")
@@ -414,6 +501,14 @@ def place_order() -> Any:
         ):
             raise ValueError("Product IDs and quantities must be positive integers.")
         quantities[product_id] = quantities.get(product_id, 0) + quantity
+        raw_note = str(item.get("customization_note", "")).strip()[:240]
+        try:
+            addon_dec = Decimal(str(item.get("addon_price", "0")))
+        except Exception:
+            addon_dec = Decimal("0")
+        if addon_dec not in allowed_addons:
+            raise ValueError("Invalid saree finishing add-on price.")
+        customizations[product_id] = (raw_note, addon_dec)
 
     product_ids = sorted(quantities)
     placeholders = ", ".join(["%s"] * len(product_ids))
@@ -443,7 +538,8 @@ def place_order() -> Any:
                             f"Only {product['stock']} item(s) remain for "
                             f"{product['saree_name']}."
                         )
-                    total += product["price"] * quantity
+                    _, addon_dec = customizations[product["product_id"]]
+                    total += (product["price"] + addon_dec) * quantity
 
                 cursor.execute(
                     "INSERT INTO orders (customer_id, total_amount) VALUES (%s, %s)",
@@ -452,11 +548,12 @@ def place_order() -> Any:
                 order_id = cursor.lastrowid
                 for product in products:
                     quantity = quantities[product["product_id"]]
+                    note, addon_dec = customizations[product["product_id"]]
                     cursor.execute(
                         """
                         INSERT INTO order_details
-                          (order_id, product_id, saree_name, quantity, unit_price)
-                        VALUES (%s, %s, %s, %s, %s)
+                          (order_id, product_id, saree_name, quantity, unit_price, customization_note, addon_price)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             order_id,
@@ -464,6 +561,8 @@ def place_order() -> Any:
                             product["saree_name"],
                             quantity,
                             product["price"],
+                            note,
+                            addon_dec,
                         ),
                     )
                     cursor.execute(

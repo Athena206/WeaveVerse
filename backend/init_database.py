@@ -5,11 +5,11 @@ import pymysql
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / ".env", override=True)
 
-database = "first_saree_centre"
+database = os.getenv("MYSQL_DATABASE", "first_saree_centre")
 connection = pymysql.connect(
-    host="127.0.0.1",
+    host=os.getenv("MYSQL_HOST", "127.0.0.1"),
     port=int(os.getenv("MYSQL_PORT", "3306")),
     user="root",
     password=os.getenv("MYSQL_ROOT_PASSWORD", ""),

@@ -58,10 +58,37 @@ try:
             "image_credit": "VARCHAR(180) NOT NULL DEFAULT 'First Saree Centre'",
             "image_license": "VARCHAR(80) NOT NULL DEFAULT 'Project photography'",
             "image_source": "VARCHAR(1000) NOT NULL DEFAULT ''",
+            "length_meters": "DECIMAL(3, 1) NOT NULL DEFAULT 6.2",
+            "blouse_piece_meters": "DECIMAL(3, 1) NOT NULL DEFAULT 0.8",
+            "weight_grams": "INT UNSIGNED NOT NULL DEFAULT 480",
+            "drape_feel": "VARCHAR(60) NOT NULL DEFAULT 'Fluid & breathable'",
+            "sheerness": "VARCHAR(40) NOT NULL DEFAULT 'Opaque'",
+            "care_instructions": "VARCHAR(240) NOT NULL DEFAULT 'Dry clean recommended, store folded in unbleached muslin.'",
+            "focal_point": "VARCHAR(30) NOT NULL DEFAULT '50% 18%'",
+            "weight_score": "TINYINT UNSIGNED NOT NULL DEFAULT 45",
+            "drape_score": "TINYINT UNSIGNED NOT NULL DEFAULT 80",
+            "sheerness_score": "TINYINT UNSIGNED NOT NULL DEFAULT 25",
+            "luster_score": "TINYINT UNSIGNED NOT NULL DEFAULT 70",
         }
         for name, declaration in migrations.items():
             if existing_columns and name not in existing_columns:
                 cursor.execute(f"ALTER TABLE sarees ADD COLUMN {name} {declaration}")
+
+        cursor.execute(
+            """
+            SELECT COLUMN_NAME
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = %s AND TABLE_NAME = 'order_details'
+            """,
+            (DATABASE,),
+        )
+        order_detail_cols = {row[0] for row in cursor.fetchall()}
+        for name, declaration in {
+            "customization_note": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "addon_price": "DECIMAL(10, 2) UNSIGNED NOT NULL DEFAULT 0.00",
+        }.items():
+            if order_detail_cols and name not in order_detail_cols:
+                cursor.execute(f"ALTER TABLE order_details ADD COLUMN {name} {declaration}")
 
         if existing_columns:
             cursor.execute(
