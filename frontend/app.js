@@ -80,8 +80,70 @@ function routeFromHash() {
   };
 }
 
+function currentHash() {
+  return window.location.hash.slice(1) || "home";
+}
+
+function routePageFromHash(hash) {
+  const clean = String(hash || "").replace(/^#/, "") || "home";
+  if (clean.startsWith("product/")) return "product";
+  const page = clean.split("/")[0];
+  return ["shop", "contact", "orders", "login", "register", "account"].includes(page)
+    ? page
+    : "home";
+}
+
+const NO_BACK_PAGES = new Set(["home", "shop", "contact", "account", "orders"]);
+
+function shouldShowBackButton() {
+  return !NO_BACK_PAGES.has(state.route.page);
+}
+
+function isSkippableBackTarget(hash) {
+  const page = routePageFromHash(hash);
+  const isSignedIn = Boolean(state.token && state.customer);
+  if (isSignedIn && (page === "login" || page === "register")) return true;
+  if (!isSignedIn && (page === "account" || page === "orders")) return true;
+  return false;
+}
+
+function fallbackHashForPage(page) {
+  if (page === "product") return "shop";
+  return "home";
+}
+
+let isBackNavigation = false;
+
+function goBack() {
+  const current = currentHash();
+  while (state.navHistory.length && state.navHistory[state.navHistory.length - 1] === current) {
+    state.navHistory.pop();
+  }
+  let target = "";
+  while (state.navHistory.length) {
+    const candidate = state.navHistory.pop();
+    if (candidate === current) continue;
+    if (isSkippableBackTarget(candidate)) continue;
+    target = candidate;
+    break;
+  }
+  if (!target) {
+    target = fallbackHashForPage(state.route.page);
+  }
+  state.navHistory.push(target);
+  isBackNavigation = true;
+  if (currentHash() !== target) {
+    window.location.hash = target;
+  } else {
+    isBackNavigation = false;
+  }
+}
+
 const state = {
   route: routeFromHash(),
+  navHistory: [currentHash()],
+  postAuthReturnHash: "",
+  postAuthOpenCheckout: false,
   products: [],
   productsLoading: true,
   catalogError: "",
@@ -113,6 +175,8 @@ const state = {
   theme: localStorage.getItem(storageKeys.theme)
     || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
   notice: "",
+  voiceListening: false,
+  voiceStatus: "",
   catalog: {
     search: "",
     fabric: routeFromHash().fabric || "All fabrics",
@@ -182,8 +246,16 @@ function pageHeader() {
   const accountAction = state.customer
     ? `<a class="text-button account-button" href="#account">Hi, ${escapeHTML(state.customer.first_name)}</a>`
     : `<a class="text-button account-button" href="#login">Sign in</a>`;
+  const backButton = shouldShowBackButton()
+    ? `<button type="button" class="nav-back-btn" data-action="go-back" aria-label="Go back to previous page" title="Go back">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      </button>`
+    : "";
   return `<header class="site-header">
-    ${brandLink()}
+    <div class="header-left">
+      ${backButton}
+      ${brandLink()}
+    </div>
     <nav class="main-nav" aria-label="Main navigation">
       <a class="${state.route.page === "home" ? "active" : ""}" href="#home">Home</a>
       <a class="${state.route.page === "shop" ? "active" : ""}" href="#shop">Shop</a>
@@ -315,7 +387,6 @@ function homePage() {
         <div class="hero-logo-ring"></div>
         <div class="hero-logo-ring ring-inner"></div>
         <div class="hero-logo-emblem">${brandMark()}</div>
-        <span class="hero-logo-caption">WEAVEVERSE · HANDLOOM ARCHIVE</span>
       </div>
     </div>
   </section>
@@ -344,38 +415,244 @@ function matchesPriceRange(price, range) {
   return true;
 }
 
+const SEARCH_STOP_WORDS = new Set([
+  "a", "an", "the", "for", "with", "in", "of", "on", "to", "and", "or",
+  "show", "me", "find", "search", "saree", "sarees", "sari", "saris",
+  "please", "want", "need", "looking", "give", "get", "some", "any",
+  "i", "my", "buy", "best", "good", "nice", "that", "this", "is", "are",
+]);
+
+const SEARCH_SYNONYMS = {
+  kanjeevaram: ["kanjivaram", "kanchipuram", "kanjeevaram"],
+  kanchipuram: ["kanjivaram", "kanchipuram", "kanjeevaram"],
+  kanchi: ["kanjivaram", "kanchipuram"],
+  banaras: ["banarasi", "varanasi"],
+  banarasi: ["banarasi", "varanasi"],
+  benares: ["banarasi", "varanasi"],
+  benarasi: ["banarasi", "varanasi"],
+  paitani: ["paithani"],
+  bandhej: ["bandhani", "bandhej"],
+  bandhni: ["bandhani", "bandhej"],
+  tasar: ["tussar", "tasar"],
+  tussore: ["tussar", "tussore"],
+  tusser: ["tussar"],
+  chikan: ["chikankari", "chikan"],
+  lucknowi: ["chikankari", "lucknow"],
+  jari: ["zari", "jari"],
+  zari: ["zari", "jari"],
+  bridal: ["wedding", "bridal", "ceremony"],
+  bride: ["wedding", "bridal"],
+  shaadi: ["wedding", "bridal"],
+  marriage: ["wedding", "bridal"],
+  everyday: ["daily", "everyday", "casual"],
+  office: ["office", "work", "daily", "formal"],
+  festival: ["festive", "festival", "puja", "celebration"],
+  pooja: ["puja", "festive"],
+  diwali: ["festive", "celebration", "evening"],
+  lightweight: ["light", "airy", "soft", "breathable", "fluid"],
+  light: ["light", "airy", "soft", "breathable"],
+  mulmul: ["cotton", "mulmul", "handloom"],
+  malmal: ["cotton", "mulmul"],
+  ikkat: ["ikat", "sambalpuri"],
+  odisha: ["sambalpuri", "odisha"],
+};
+
+function extractSearchTerms(rawQuery) {
+  const cleaned = String(rawQuery || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .trim();
+  if (!cleaned) return [];
+  const rawTokens = cleaned.split(/\s+/).filter(Boolean);
+  const meaningful = rawTokens.filter((w) => w.length >= 2 && !SEARCH_STOP_WORDS.has(w));
+  return meaningful.length ? [...new Set(meaningful)] : [...new Set(rawTokens)];
+}
+
+function expandSearchVariants(term) {
+  const variants = new Set([term]);
+  if (term.length > 3 && term.endsWith("s")) variants.add(term.slice(0, -1));
+  if (term.length > 4 && term.endsWith("es")) variants.add(term.slice(0, -2));
+  if (SEARCH_SYNONYMS[term]) {
+    for (const alt of SEARCH_SYNONYMS[term]) variants.add(alt);
+  }
+  return [...variants];
+}
+
+function scoreProductSearch(product, rawQuery) {
+  const trimmed = String(rawQuery || "").trim().toLowerCase();
+  if (!trimmed) return { matched: true, score: 0, matchedWords: [] };
+
+  const nameText = String(product.saree_name || "").toLowerCase();
+  const tagText = `${product.fabric || ""} ${product.weave || ""} ${product.region || ""} ${product.occasion || ""} ${product.category || ""}`.toLowerCase();
+  const detailText = `${product.description || ""} ${product.drape_feel || ""} ${product.sheerness || ""} ${product.care_instructions || ""}`.toLowerCase();
+  const combined = `${nameText} ${tagText} ${detailText}`;
+
+  let score = 0;
+  if (combined.includes(trimmed)) score += 100;
+
+  const terms = extractSearchTerms(trimmed);
+  const matchedWords = [];
+  for (const term of terms) {
+    const variants = expandSearchVariants(term);
+    let termScore = 0;
+    for (const v of variants) {
+      if (nameText.includes(v)) termScore = Math.max(termScore, 24);
+      else if (tagText.includes(v)) termScore = Math.max(termScore, 16);
+      else if (detailText.includes(v)) termScore = Math.max(termScore, 8);
+    }
+    if (termScore > 0) {
+      score += termScore;
+      matchedWords.push(term);
+    }
+  }
+
+  if (matchedWords.length > 0) {
+    score += matchedWords.length * 25;
+  }
+
+  return { matched: score > 0, score, matchedWords };
+}
+
+let activeRecognition = null;
+
+function toggleVoiceSearch() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showNotice("Voice search is not supported in this browser. Try Chrome or Edge.");
+    return;
+  }
+  if (state.voiceListening && activeRecognition) {
+    try { activeRecognition.stop(); } catch {}
+    state.voiceListening = false;
+    state.voiceStatus = "";
+    activeRecognition = null;
+    render();
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "en-IN";
+  recognition.interimResults = true;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 1;
+  activeRecognition = recognition;
+
+  recognition.onstart = () => {
+    state.voiceListening = true;
+    state.voiceStatus = "Listening… speak a saree weave, fabric, colour, or occasion";
+    render();
+  };
+
+  recognition.onresult = (event) => {
+    let transcript = "";
+    let isFinal = false;
+    for (let i = event.resultIndex; i < event.results.length; i += 1) {
+      transcript += event.results[i][0].transcript;
+      if (event.results[i].isFinal) isFinal = true;
+    }
+    const cleaned = transcript.trim().replace(/[.!?]+$/, "");
+    if (cleaned) {
+      state.catalog.search = cleaned;
+      state.voiceStatus = isFinal ? `Heard: “${cleaned}”` : `Hearing: “${cleaned}”…`;
+      render();
+    }
+  };
+
+  recognition.onerror = (event) => {
+    state.voiceListening = false;
+    state.voiceStatus = "";
+    activeRecognition = null;
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      showNotice("Microphone access was blocked. Allow microphone permission to use voice search.");
+    } else if (event.error === "no-speech") {
+      showNotice("Didn't catch any speech. Tap the mic and try speaking again.");
+    } else if (event.error !== "aborted") {
+      showNotice("Voice search could not hear you clearly. Please try again.");
+    } else {
+      render();
+    }
+  };
+
+  recognition.onend = () => {
+    state.voiceListening = false;
+    activeRecognition = null;
+    if (state.catalog.search.trim()) {
+      state.voiceStatus = "";
+    } else {
+      state.voiceStatus = "";
+    }
+    render();
+  };
+
+  try {
+    recognition.start();
+  } catch {
+    state.voiceListening = false;
+    state.voiceStatus = "";
+    activeRecognition = null;
+    showNotice("Could not start voice search. Please try again.");
+  }
+}
+
 function catalogPage() {
   const fabrics = getFabricOptions(state.products);
   const regions = ["All regions", ...new Set(state.products.map((product) => product.region))];
   const occasions = ["All occasions", ...new Set(state.products.map((product) => product.occasion))];
   const selectedValues = selectedFabricValues(fabrics, state.catalog.fabric);
-  const filtered = state.products.filter((product) => {
-    const searchable = `${product.saree_name} ${product.fabric} ${product.weave} ${product.region} ${product.occasion}`.toLowerCase();
-    return searchable.includes(state.catalog.search.toLowerCase())
+  const hasSearch = Boolean(state.catalog.search.trim());
+  const searchTerms = extractSearchTerms(state.catalog.search);
+
+  const scored = state.products
+    .map((product) => ({ product, match: scoreProductSearch(product, state.catalog.search) }))
+    .filter(({ product, match }) => match.matched
       && (state.catalog.fabric === "All fabrics" || selectedValues.includes(normalizedFabric(product.fabric)))
       && (state.catalog.region === "All regions" || product.region === state.catalog.region)
       && (state.catalog.occasion === "All occasions" || product.occasion === state.catalog.occasion)
-      && matchesPriceRange(product.price, state.catalog.priceRange);
-  }).sort((left, right) => {
-    if (state.catalog.sort === "price-asc") return Number(left.price) - Number(right.price);
-    if (state.catalog.sort === "price-desc") return Number(right.price) - Number(left.price);
-    if (state.catalog.sort === "name") return left.saree_name.localeCompare(right.saree_name);
-    return right.product_id - left.product_id;
-  });
+      && matchesPriceRange(product.price, state.catalog.priceRange))
+    .sort((left, right) => {
+      if (hasSearch && state.catalog.sort === "newest" && right.match.score !== left.match.score) {
+        return right.match.score - left.match.score;
+      }
+      if (state.catalog.sort === "price-asc") return Number(left.product.price) - Number(right.product.price);
+      if (state.catalog.sort === "price-desc") return Number(right.product.price) - Number(left.product.price);
+      if (state.catalog.sort === "name") return left.product.saree_name.localeCompare(right.product.saree_name);
+      return right.product.product_id - left.product.product_id;
+    });
+
+  const filtered = scored.map(({ product }) => product);
   const priceRanges = [
     { key: "all", label: "All prices" },
     { key: "under-2000", label: "Under ₹2,000" },
     { key: "2000-5000", label: "₹2,000 – ₹5,000" },
     { key: "above-5000", label: "₹5,000+ Heirloom" },
   ];
+  const quickSuggestions = ["Banarasi silk", "Wedding zari", "Lightweight cotton", "Kanjivaram", "Daily wear"];
+  const micIcon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>`;
+  const searchIcon = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`;
+
   return `<section class="page-shell catalog-page">
     <div class="catalog-intro"><div><p class="eyebrow">A THOUGHTFUL COLLECTION</p><h1>Find your <em>forever drape.</em></h1><p>Handloom stories, gathered from the places that make them.</p></div><span class="catalog-count">${filtered.length} of ${state.products.length} sarees</span></div>
+    <div class="catalog-search-hero">
+      <div class="search-field ${state.voiceListening ? "is-listening" : ""}" role="search">
+        <span class="search-field-icon">${searchIcon}</span>
+        <input id="catalog-search" type="search" value="${escapeHTML(state.catalog.search)}" placeholder="Search by weave, fabric, colour, region, or occasion — or speak with the mic…" aria-label="Search sarees" autocomplete="off">
+        ${state.catalog.search ? `<button type="button" class="search-clear-btn" data-action="clear-search" aria-label="Clear search" title="Clear search">✕</button>` : ""}
+        <button type="button" class="voice-search-btn ${state.voiceListening ? "listening" : ""}" data-action="voice-search" aria-label="${state.voiceListening ? "Stop voice search" : "Search sarees by voice"}" title="${state.voiceListening ? "Stop listening" : "Search by voice"}">
+          ${micIcon}
+          <span>${state.voiceListening ? "Listening…" : "Voice"}</span>
+        </button>
+      </div>
+      ${state.voiceStatus
+        ? `<p class="voice-status-bar" role="status"><span class="voice-pulse-dot" aria-hidden="true"></span>${escapeHTML(state.voiceStatus)}</p>`
+        : hasSearch && searchTerms.length
+          ? `<p class="search-match-hint">Showing <strong>${filtered.length}</strong> ${filtered.length === 1 ? "saree" : "sarees"} matching: ${searchTerms.map((t) => `<span class="search-term-chip">${escapeHTML(t)}</span>`).join(" ")}</p>`
+          : `<div class="search-suggestions"><span class="search-suggestions-label">Try saying or searching:</span>${quickSuggestions.map((s) => `<button type="button" class="search-suggestion-chip" data-action="quick-search" data-value="${escapeHTML(s)}">${escapeHTML(s)}</button>`).join("")}</div>`}
+    </div>
     <div class="catalog-tools">
       <div class="category-pills">
         <button class="${state.catalog.fabric === "All fabrics" ? "selected" : ""}" data-action="fabric" data-value="All fabrics">All fabrics <span>${state.products.length}</span></button>
         ${fabrics.map((fabric) => `<button class="${fabricIsSelected(fabric, state.catalog.fabric) ? "selected" : ""}" data-action="fabric" data-value="${escapeHTML(fabric.label)}">${escapeHTML(fabric.label)} <span>${fabric.count}</span></button>`).join("")}
       </div>
-      <label class="search-field"><span>⌕</span><input id="catalog-search" value="${escapeHTML(state.catalog.search)}" placeholder="Search weave, fabric, region..."></label>
     </div>
     <div class="price-pills" role="group" aria-label="Filter by price range">
       ${priceRanges.map((r) => `<button type="button" class="price-pill ${state.catalog.priceRange === r.key ? "selected" : ""}" data-action="price-range" data-value="${r.key}">${r.label}</button>`).join("")}
@@ -424,11 +701,20 @@ function productPage(product) {
         <p>${escapeHTML(review.review_text)}</p>
         <span>${escapeHTML(review.first_name)} ${escapeHTML(review.last_name)} · ${new Date(review.created_at).toLocaleDateString("en-IN")}</span>
       </article>`).join("")}</div>`;
+  const ratingLabels = { 1: "1 star · Needs work", 2: "2 stars · Fair", 3: "3 stars · Good", 4: "4 stars · Very good", 5: "5 stars · Loved it" };
+  const starSvg = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4l2.92 5.92 6.53.95-4.72 4.6 1.11 6.5L12 17.3l-5.84 3.07 1.11-6.5-4.72-4.6 6.53-.95L12 2.4z"/></svg>`;
   const reviewForm = state.token
     ? `<form class="review-form" data-form="review">
-        <label>Your rating<select name="rating">${[5, 4, 3, 2, 1].map((value) => `<option value="${value}" ${state.rating === value ? "selected" : ""}>${value} ${value === 1 ? "star" : "stars"}</option>`).join("")}</select></label>
+        <div class="rating-field">
+          <span class="rating-field-label">Your rating</span>
+          <input type="hidden" name="rating" value="${state.rating}">
+          <div class="star-rating-picker" role="radiogroup" aria-label="Your rating">
+            ${[1, 2, 3, 4, 5].map((value) => `<button type="button" class="star-btn ${value <= state.rating ? "is-active" : ""}" data-action="set-rating" data-value="${value}" role="radio" aria-checked="${state.rating === value}" aria-label="${value} ${value === 1 ? "star" : "stars"}" title="${value} ${value === 1 ? "star" : "stars"}">${starSvg}</button>`).join("")}
+            <span class="star-rating-text">${ratingLabels[state.rating] || `${state.rating} stars`}</span>
+          </div>
+        </div>
         <label>Your review<textarea name="review_text" rows="3" maxlength="1200" placeholder="Tell other shoppers what you loved..." required></textarea></label>
-        <button class="button button-outline" ${state.reviewBusy ? "disabled" : ""}>${state.reviewBusy ? "Submitting..." : "Share your review"}</button>
+        <button type="submit" class="button button-outline" ${state.reviewBusy ? "disabled" : ""}>${state.reviewBusy ? "Submitting..." : "Share your review"}</button>
         ${state.reviewMessage ? `<p class="form-message" role="status">${escapeHTML(state.reviewMessage)}</p>` : ""}
       </form>`
     : `<p class="review-signin"><a class="text-link" href="#login">Sign in</a> to leave a review.</p>`;
@@ -1067,6 +1353,8 @@ function ensureAppShell() {
 
 function render() {
   document.documentElement.dataset.theme = state.theme;
+  const themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.setAttribute("content", state.theme === "dark" ? "#120E0D" : "#FAF6F0");
   ensureAppShell();
 
   const headerSlot = root.querySelector("#header-slot");
@@ -1347,12 +1635,18 @@ function clearSession() {
 
 function signOut() {
   clearSession();
+  state.navHistory = state.navHistory.filter((h) => {
+    const p = routePageFromHash(h);
+    return p !== "account" && p !== "orders";
+  });
   window.location.hash = "home";
   showNotice("You have been signed out.");
 }
 
 async function checkout() {
   if (!state.token) {
+    state.postAuthReturnHash = currentHash();
+    state.postAuthOpenCheckout = true;
     state.cartOpen = false;
     state.checkoutOpen = false;
     window.location.hash = "login";
@@ -1443,8 +1737,28 @@ async function submitAuth(form) {
     localStorage.setItem(storageKeys.token, result.token);
     localStorage.setItem(storageKeys.customer, JSON.stringify(result.customer));
     state.busy = false;
-    window.location.hash = "account";
-    showNotice(`Welcome${result.customer.first_name ? `, ${result.customer.first_name}` : ""}!`);
+    state.navHistory = state.navHistory.filter((h) => {
+      const p = routePageFromHash(h);
+      return p !== "login" && p !== "register";
+    });
+    const returnHash = state.postAuthReturnHash;
+    const reopenCheckout = state.postAuthOpenCheckout;
+    state.postAuthReturnHash = "";
+    state.postAuthOpenCheckout = false;
+    if (returnHash) {
+      if (reopenCheckout && state.cart.length > 0) {
+        state.checkoutOpen = true;
+      }
+      if (currentHash() !== returnHash) {
+        window.location.hash = returnHash;
+      } else {
+        render();
+      }
+      showNotice(`Welcome${result.customer.first_name ? `, ${result.customer.first_name}` : ""}! You can now complete your order.`);
+    } else {
+      window.location.hash = "account";
+      showNotice(`Welcome${result.customer.first_name ? `, ${result.customer.first_name}` : ""}!`);
+    }
   } catch (error) {
     state.busy = false;
     state.authError = error.message;
@@ -1457,9 +1771,11 @@ async function submitReview(form) {
   const values = new FormData(form);
   state.reviewBusy = true;
   state.reviewMessage = "";
-  const submitButton = form.querySelector("button");
-  submitButton.disabled = true;
-  submitButton.textContent = "Submitting...";
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "Submitting...";
+  }
   try {
     await apiRequest(`/products/${productId}/reviews`, {
       method: "POST",
@@ -1484,7 +1800,9 @@ function handleAction(button, clickEvent) {
   const action = button.dataset.action;
   const productId = Number(button.dataset.id);
   const product = state.products.find((item) => item.product_id === productId);
-  if (action === "theme") {
+  if (action === "go-back") {
+    goBack();
+  } else if (action === "theme") {
     state.theme = state.theme === "light" ? "dark" : "light";
     localStorage.setItem(storageKeys.theme, state.theme);
     render();
@@ -1572,6 +1890,8 @@ function handleAction(button, clickEvent) {
     }
   } else if (action === "open-checkout") {
     if (!state.token) {
+      state.postAuthReturnHash = currentHash();
+      state.postAuthOpenCheckout = true;
       state.cartOpen = false;
       window.location.hash = "login";
       showNotice("Sign in to continue to payment.");
@@ -1636,9 +1956,45 @@ function handleAction(button, clickEvent) {
   } else if (action === "price-range") {
     state.catalog.priceRange = button.dataset.value;
     render();
+  } else if (action === "voice-search") {
+    toggleVoiceSearch();
+  } else if (action === "clear-search") {
+    state.catalog.search = "";
+    state.voiceStatus = "";
+    render();
+    const search = document.getElementById("catalog-search");
+    if (search) search.focus();
+  } else if (action === "quick-search") {
+    state.catalog.search = button.dataset.value || "";
+    render();
+    const search = document.getElementById("catalog-search");
+    if (search) search.focus();
   } else if (action === "clear-filters") {
     state.catalog = { search: "", fabric: "All fabrics", region: "All regions", occasion: "All occasions", priceRange: "all", sort: "newest" };
     render();
+  } else if (action === "set-rating") {
+    const val = Math.max(1, Math.min(5, Number(button.dataset.value) || 5));
+    state.rating = val;
+    const picker = button.closest(".star-rating-picker");
+    const form = button.closest("form");
+    const hidden = form && form.querySelector('input[name="rating"]');
+    if (hidden) hidden.value = String(val);
+    if (picker) {
+      const ratingLabels = { 1: "1 star · Needs work", 2: "2 stars · Fair", 3: "3 stars · Good", 4: "4 stars · Very good", 5: "5 stars · Loved it" };
+      picker.querySelectorAll(".star-btn").forEach((star) => {
+        const starVal = Number(star.dataset.value);
+        const active = starVal <= val;
+        star.classList.toggle("is-active", active);
+        star.classList.remove("is-hover", "is-pop");
+        star.setAttribute("aria-checked", String(starVal === val));
+        if (starVal <= val) {
+          void star.offsetWidth;
+          star.classList.add("is-pop");
+        }
+      });
+      const text = picker.querySelector(".star-rating-text");
+      if (text) text.textContent = ratingLabels[val] || `${val} stars`;
+    }
   } else if (action === "retry") {
     loadProducts();
   }
@@ -1681,7 +2037,19 @@ document.addEventListener("change", (event) => {
 });
 
 window.addEventListener("hashchange", () => {
+  const nextHash = currentHash();
+  const returningViaBack = isBackNavigation;
+  if (isBackNavigation) {
+    isBackNavigation = false;
+  } else if (state.navHistory[state.navHistory.length - 1] !== nextHash) {
+    state.navHistory.push(nextHash);
+    if (state.navHistory.length > 50) state.navHistory.shift();
+  }
   state.route = routeFromHash();
+  if (state.route.page !== "login" && state.route.page !== "register") {
+    state.postAuthReturnHash = "";
+    state.postAuthOpenCheckout = false;
+  }
   state.authError = "";
   state.productError = "";
   state.reviewMessage = "";
@@ -1696,7 +2064,7 @@ window.addEventListener("hashchange", () => {
     state.catalog.region = "All regions";
     state.catalog.occasion = "All occasions";
     state.catalog.priceRange = "all";
-  } else if (state.route.page === "shop") {
+  } else if (state.route.page === "shop" && !returningViaBack) {
     state.catalog.fabric = "All fabrics";
   }
   render();
@@ -1738,6 +2106,24 @@ document.addEventListener("pointermove", (e) => {
 document.addEventListener("pointerout", (e) => {
   const box = e.target.closest?.(".detail-image");
   if (box && !box.contains(e.relatedTarget)) box.classList.remove("is-zooming");
+});
+
+// Interactive hover preview for 5-star review picker
+document.addEventListener("mouseover", (e) => {
+  const star = e.target.closest?.(".star-btn");
+  if (!star) return;
+  const picker = star.closest(".star-rating-picker");
+  if (!picker) return;
+  const hoverVal = Number(star.dataset.value) || 0;
+  picker.querySelectorAll(".star-btn").forEach((btn) => {
+    btn.classList.toggle("is-hover", Number(btn.dataset.value) <= hoverVal);
+  });
+});
+document.addEventListener("mouseout", (e) => {
+  const picker = e.target.closest?.(".star-rating-picker");
+  if (picker && !picker.contains(e.relatedTarget)) {
+    picker.querySelectorAll(".star-btn").forEach((btn) => btn.classList.remove("is-hover"));
+  }
 });
 
 async function restoreSession() {

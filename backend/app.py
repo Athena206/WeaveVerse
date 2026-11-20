@@ -1,4 +1,6 @@
 import os
+import re
+import sys
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
@@ -14,6 +16,11 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from mysql_manager import ensure_mysql_running
+
 ENV_FILE = BASE_DIR / ".env"
 load_dotenv(ENV_FILE, override=True)
 
@@ -39,16 +46,23 @@ def storefront() -> Any:
 
 def get_connection() -> pymysql.Connection:
     load_dotenv(ENV_FILE, override=True)
-    return pymysql.connect(
-        host=os.getenv("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.getenv("MYSQL_PORT", "3306")),
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", ""),
-        database=os.getenv("MYSQL_DATABASE", "first_saree_centre"),
-        charset="utf8mb4",
-        cursorclass=DictCursor,
-        autocommit=False,
-    )
+    connect_kwargs = {
+        "host": os.getenv("MYSQL_HOST", "127.0.0.1"),
+        "port": int(os.getenv("MYSQL_PORT", "3307")),
+        "user": os.getenv("MYSQL_USER", "root"),
+        "password": os.getenv("MYSQL_PASSWORD", ""),
+        "database": os.getenv("MYSQL_DATABASE", "first_saree_centre"),
+        "charset": "utf8mb4",
+        "cursorclass": DictCursor,
+        "autocommit": False,
+    }
+    try:
+        return pymysql.connect(**connect_kwargs)
+    except pymysql.err.OperationalError as error:
+        if error.args and error.args[0] == 2003:
+            ensure_mysql_running()
+            return pymysql.connect(**connect_kwargs)
+        raise
 
 
 def json_body() -> dict[str, Any]:
@@ -111,7 +125,10 @@ def handle_database_error(error: pymysql.MySQLError) -> tuple[Any, int]:
 
 @app.get("/api/health")
 def health() -> Any:
-    return jsonify({"status": "ok"})
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+    return jsonify({"status": "ok", "database": "connected"})
 
 
 @app.post("/api/auth/register")
@@ -244,12 +261,35 @@ def list_products() -> Any:
     clauses = ["s.is_active = TRUE"]
     values: list[str] = []
     if filters["q"]:
-        clauses.append(
-            "(s.saree_name LIKE %s OR s.description LIKE %s OR s.weave LIKE %s "
-            "OR s.fabric LIKE %s OR s.region LIKE %s)"
+        stop_words = {
+            "a", "an", "the", "for", "with", "in", "of", "on", "to", "and", "or",
+            "show", "me", "find", "search", "saree", "sarees", "sari", "saris",
+            "please", "want", "need", "looking", "give", "get", "some", "any",
+            "i", "my", "buy", "best", "good", "nice",
+        }
+        raw_tokens = re.findall(r"[a-z0-9]+", filters["q"].lower())
+        tokens = [t for t in raw_tokens if len(t) >= 2 and t not in stop_words]
+        if not tokens:
+            tokens = [t for t in raw_tokens if t]
+        search_fields = (
+            "s.saree_name",
+            "s.description",
+            "s.weave",
+            "s.fabric",
+            "s.region",
+            "s.category",
+            "s.occasion",
+            "s.drape_feel",
+            "s.sheerness",
         )
-        search_term = f"%{filters['q']}%"
-        values.extend([search_term] * 5)
+        token_clauses: list[str] = []
+        for token in tokens[:10]:
+            pattern = f"%{token}%"
+            field_expr = " OR ".join(f"{col} LIKE %s" for col in search_fields)
+            token_clauses.append(f"({field_expr})")
+            values.extend([pattern] * len(search_fields))
+        if token_clauses:
+            clauses.append(f"({' OR '.join(token_clauses)})")
     for field in ("category", "fabric", "region", "occasion"):
         if filters[field]:
             clauses.append(f"s.{field} = %s")
@@ -593,4 +633,5 @@ def uploaded_image(filename: str) -> Any:
 if __name__ == "__main__":
     if not app.config["SECRET_KEY"]:
         raise RuntimeError("Set SECRET_KEY in backend/.env before starting the API.")
+    ensure_mysql_running()
     app.run(host="127.0.0.1", port=5000, debug=os.getenv("FLASK_DEBUG") == "1")
